@@ -1,0 +1,240 @@
+---
+title: "Which is the best team ever in Italian soccer?"
+output: html_document
+author: Riccardo Paravano
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+# cache results
+knitr::opts_chunk$set(cache=FALSE, echo = TRUE, eval = TRUE, message=FALSE, warning = FALSE, fig.align='center')
+```
+
+### Challenge 1: Plan for scraping the data
+
+CHALLENGE: "Think about how to scrape the data from the website, but write no code at this stage"
+
+The page contains one CSV download link for Serie A (`I1.csv`) for each season. 
+A possible working strategy could be:
+
+1. Download and parse the HTML page containing the Italian league datasets.
+2. Extract the `href` attribute from every hyperlink on the page.
+3. Keep only links whose paths identify a Serie A CSV file. These links end in `I1.csv`.
+4. Extract the four-digit season code from each URL  (`9394` represents 1993/94 for example).
+5. Retain seasons whose starting year is 1993 or later.
+6. Convert relative links into absolute URLs and remove duplicates.
+7. Download each selected CSV file and combine the rows into one dataset.
+8. Select only `Date`, `HomeTeam`, `AwayTeam`, `FTHG`, and `FTAG` ( I chose to change column names FTHG in HomeGoal and FTAG in AwayGoal for clarity).
+9. Check the result.
+
+### Challenge 2: Import the data
+
+CHALLENGE: "Ask AI to write code to import data by scraping the website. Select only columns Date, HomeTeam, AwayTeam, FTHG (home team goals), FTAG (away team goals)  and filter rows with a valid (not NA) Date"
+
+```{r import-serie-a-data}
+# Load the packages required for scraping, importing, and cleaning the data.
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(readr)
+library(rvest)
+library(stringr)
+library(lubridate)
+
+# Define the web page containing the Italian football datasets.
+source_page <- "http://www.football-data.co.uk/italym.php"
+
+# Scrape all links from the page and identify the Serie A CSV files.
+serie_a_links <- read_html(source_page) |>
+  html_elements("a") |>                  # Select all hyperlinks.
+  html_attr("href") |>                   # Extract their destinations.
+  tibble(href = _) |>                    # Convert the links into a tibble. _ it takes the values from the precedent line.
+  filter(!is.na(href)) |>                # Remove elements without a link.
+  mutate(
+    # Convert relative links into complete URLs.
+    url = url_absolute(href, source_page),
+
+    # Extract the four-digit season code from each Serie A CSV URL.
+    season = str_match(
+      url,
+      "/mmz4281/(\\d{4})/I1\\.csv(?:$|\\?)"
+    )[, 2],
+
+    # Extract the first two digits of the season code.
+    first_year_two_digits = as.integer(
+      str_sub(season, 1, 2)
+    ),
+
+    # Convert the abbreviated year into a four-digit starting year.
+    season_start = if_else(
+      first_year_two_digits >= 90L,
+      1900L + first_year_two_digits,
+      2000L + first_year_two_digits
+    )
+  ) |>
+  # Keep only Serie A seasons starting from 1993.
+  filter(
+    !is.na(season),
+    season_start >= 1993L
+  ) |>
+  distinct(
+    season,
+    url,
+    .keep_all = TRUE
+  ) |>                                    # Remove duplicate season links.
+  arrange(season_start)                   # Sort seasons chronologically.
+
+# Stop the program if no valid Serie A links have been found.
+stopifnot(nrow(serie_a_links) > 0L)
+
+# Download every season and combine the matches into one dataset.
+serie_a <- serie_a_links |>
+  transmute(
+    data = map(
+      url,
+      ~ read_csv(
+        .x,
+
+        # Import only the five columns required for the analysis.
+        col_types = cols_only(
+          Date = col_character(),
+          HomeTeam = col_character(),
+          AwayTeam = col_character(),
+          FTHG = col_double(),
+          FTAG = col_double()
+        ),
+
+        # Silently repair missing or duplicated column names.
+        name_repair = ~ vctrs::vec_as_names(
+          .x,
+          repair = "unique",
+          quiet = TRUE
+        ),
+
+        show_col_types = FALSE,           # Hide column-type messages.
+        progress = FALSE                  # Hide the download progress bar.
+      )
+    )
+  ) |>
+  unnest(data) |>                         # Combine all seasons into one table.
+  rename(
+    HomeGoal = FTHG,                      # Rename full-time home goals.
+    AwayGoal = FTAG                       # Rename full-time away goals.
+  ) |>
+  mutate(
+    Date = dmy(Date, quiet = TRUE),       # Convert dates to Date objects.
+    HomeGoal = as.integer(HomeGoal),      # Store home goals as integers.
+    AwayGoal = as.integer(AwayGoal)       # Store away goals as integers.
+  ) |>
+  filter(!is.na(Date)) |>                 # Remove rows with an invalid date.
+  select(
+    Date,
+    HomeTeam,
+    AwayTeam,
+    HomeGoal,
+    AwayGoal
+  )                                      # Keep the requested final columns.
+
+# Inspect the structure and data types of the final dataset.
+glimpse(serie_a)
+
+# Count the total number of imported matches.
+nrow(serie_a)
+
+# Display the earliest and latest match dates.
+range(serie_a$Date)
+
+# Count missing values in each column.
+colSums(is.na(serie_a))
+
+# Display the final dataset.
+serie_a
+```
+
+### Challenge 3: Team statistics computations
+
+CHALLENGE: "Using dplyr and tidyr packages (no for loops!), compute statistics for every team (matches, wins, losses, draws, points, points per match). Hint: mutate a column with the outcome of the match (for instance, H = home team wins, A = away team wins, P = draw). Then group by team and outcome (home and away) and hence spread the outcome."
+
+1. Keep only valid matches and determine the outcome.
+
+```{r match-outcomes}
+matches <- serie_a |>
+  filter(!is.na(HomeGoal), !is.na(AwayGoal)) |>
+  mutate(Outcome = if_else(HomeGoal > AwayGoal, "H", if_else(HomeGoal < AwayGoal,"A","P")))
+
+matches
+```
+
+`H` indicates a home win, `A` an away win, and `P` a draw.
+
+2. Count wins, losses, and draws for home teams.
+
+```{r home-statistics}
+home_stats <- matches |>
+  mutate(
+    Team = HomeTeam,
+    Result = if_else(Outcome == "H", "Wins", if_else(Outcome == "A", "Losses", "Draws"))) |>
+  select(Team, Result) |>
+  count(Team, Result)
+
+home_stats
+```
+
+2. Count wins, losses, and draws for away teams.
+
+```{r away-statistics}
+away_stats <- matches |>
+  mutate(
+    Team = AwayTeam,
+    Result = if_else(Outcome == "A", "Wins", if_else(Outcome == "H", "Losses", "Draws"))) |>
+  select(Team, Result) |>
+  count(Team, Result)
+
+away_stats
+```
+
+3 Combine home and away results.
+
+```{r combined-statistics}
+team_results <- full_join(home_stats,away_stats,
+                          by = c("Team", "Result"),
+                          suffix = c("_home", "_away")
+) |>
+  mutate(n_home = replace_na(n_home, 0), n_away = replace_na(n_away, 0), n = n_home + n_away) |>
+  select(Team, Result, n) |>
+  pivot_wider(
+    names_from = Result,
+    values_from = n,
+    values_fill = 0    # We need it bcs if a tim never lost for example, like this we will have 0 and not NA (rare but possible).
+  )
+
+team_results
+```
+
+4. Compute matches, total points and average points per match.
+
+```{r final-team-statistics}
+team_statistics <- team_results |>
+  mutate(
+    Matches = Wins + Losses + Draws,
+    Points = 3 * Wins + Draws,
+    PointsPerMatch = round(Points / Matches, 3)
+  ) |>
+  select(Team, Matches, Wins, Losses, Draws, Points, PointsPerMatch) |>
+  arrange(desc(PointsPerMatch), desc(Points))   # First by PointsPerMatch, if same by Points (Udinese is 11th as expected yeyy)
+
+team_statistics
+```
+
+### Challenge 4: Possible data questions
+
+CHALLENGE: "Come up with at least 3 data questions on the data at hand. Just write the questions, do not find the answers."
+
+1. Which teams have scored the highest average number of goals per match?
+2. Which teams show the greatest difference between goals scored at home and goals scored away?
+3. Which team has the highest points-per-match average when considering home matches and away matches separately?
+4. Which matches have recorded the highest total number of goals since the 1993/94 season?
+5. Which team has the smallest average goal difference in the matches it lost?
+6. Which team would rank first if its points for each match were calculated as the goal difference multiplied by 2 when playing away and by 0.5 when playing at home, allowing both positive and negative points?
+
