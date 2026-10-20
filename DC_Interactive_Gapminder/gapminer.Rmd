@@ -1,0 +1,250 @@
+---
+title: "Interactive Gapminder"
+author: "Riccardo Paravano"
+output:
+  prettydoc::html_pretty:
+    theme: cayman
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache = FALSE, echo = TRUE, eval = TRUE, message = FALSE, warning = FALSE, fig.align = "center")
+```
+
+### Challenge 1: Design the Shiny application
+
+CHALLENGE: "Design the provided Shiny application using the Gapminder dataset."
+
+The aim of this challenge is to recreate the provided Shiny application: https://exptime.shinyapps.io/gapminder/.
+
+By interacting with it, we can see that the user must be able to theese main actions:
+
+1. Select a year from a slider between 1952 and 2007.
+2. Select a specific continent or display all continents.
+3. Choose the variable displayed on the x-axis: life expectancy, population, or GDP per capita.
+4. Choose the variable displayed on the y-axis: life expectancy, population, or GDP per capita.
+
+Before designing the application, let's start by inspecting the Gapminder dataset and find out which variables it contains.
+
+```{r inspect-variable-names}
+library(gapminder)
+
+names(gapminder)
+```
+
+Let's also inspect the type of each variable and some values.
+
+```{r inspect-gapminder}
+library(dplyr)
+
+glimpse(gapminder)
+```
+
+Now that we know the structure of the dataset, we can start building the application.
+
+#### Step 1: Check the available years and continents
+
+The application requires a year slider and a continent selection. Before creating them, we must know which years and continents are actually available in the dataset.
+
+```{r inspect-input-values}
+# Display all the available years.
+sort(unique(gapminder$year))
+
+# Display all the available continents.
+sort(unique(gapminder$continent))
+```
+
+The first result shows that observations are available every five years from 1952 to 2007. Therefore, we can create the year slider using 1952 as its minimum value, 2007 as its maximum value, and 5 as its step.
+
+The second result shows that the dataset contains observations for Africa, Americas, Asia, Europe, and Oceania. We must include also an `All` option since it is available on the Shiny application.
+
+#### Step 2: Create a first static plot
+
+Before making the plot interactive, let's create a static version using the observations from 1952.
+
+```{r first-static-plot}
+library(ggplot2)
+
+gapminder |>
+  dplyr::filter(year == 1952) |>
+  ggplot(aes(x = gdpPercap, y = lifeExp, size = pop, colour = country)) +
+  geom_point(alpha = 0.5, show.legend = FALSE) +
+  labs(x = "GDP per capita", y = "Life expectancy")
+```
+
+The graph is displayed, but most of the observations are compressed on the left side of the x-axis (so different from how it looks on the shiny app).
+
+Let's apply a logarithmic transformation to the x-axis.
+
+```{r static-plot-log-x}
+gapminder |>
+  dplyr::filter(year == 1952) |>
+  ggplot(aes(x = gdpPercap, y = lifeExp, size = pop, colour = country)) +
+  geom_point(alpha = 0.5, show.legend = FALSE) +
+  labs(x = "GDP per capita", y = "Life expectancy") +
+  scale_x_log10()
+```
+
+The observations are now distributed exactly as on the shiny app.
+The logarithmic transformation reduces the visual distance between very large values while keeping the order of the observations unchanged.
+
+```{r static-plot-log-y}
+gapminder |>
+  dplyr::filter(year == 1952) |>
+  ggplot(aes(x = gdpPercap, y = gdpPercap, size = pop, colour = country)) +
+  geom_point(alpha = 0.5, show.legend = FALSE) +
+  labs(x = "GDP per capita", y = "GDP per capita") +
+  scale_x_log10()
+```
+
+As we can see the same problem occures on the y-axis, let's solve it as we did on the x-axis.
+
+```{r static-plot-log-y-corrected}
+gapminder |>
+  dplyr::filter(year == 1952) |>
+  ggplot(aes(x = gdpPercap, y = gdpPercap, size = pop, colour = country)) +
+  geom_point(alpha = 0.5, show.legend = FALSE) +
+  labs(x = "GDP per capita", y = "GDP per capita") +
+  scale_x_log10() +
+  scale_y_log10()
+```
+
+Now, we can finally change the theme and the point sizes.
+
+```{r static-plot-completely-functional}
+gapminder |>
+  dplyr::filter(year == 1952) |>
+  ggplot(aes(x = gdpPercap, y = gdpPercap, size = pop, colour = country)) +
+  geom_point(alpha = 0.5, show.legend = FALSE) +
+  labs(x = "GDP per capita", y = "GDP per capita") +
+  scale_x_log10() +
+  scale_y_log10() +
+  scale_colour_manual(values = country_colors) +
+  scale_size(range = c(2, 20)) +
+  theme_minimal()
+```
+
+The static plot is now complete and it reproduces the main appearance of the Shiny application.
+
+#### Step 3: Creating the app
+
+```{r final-shiny-app, eval=FALSE}
+library(shiny)
+library(gapminder)
+library(dplyr)
+library(ggplot2)
+
+# We need this vector because both axis inputs can change, so it provides readable labels for the selected variables.
+variable_labels <- c(
+  lifeExp = "Life expectancy",
+  pop = "Population",
+  gdpPercap = "GDP per capita"
+)
+
+# User interface
+ui <- fluidPage(
+  
+  titlePanel("Shiny Gapminder"),
+  
+  sidebarLayout(
+    
+    sidebarPanel(
+      
+      sliderInput(
+        inputId = "year",
+        label = "Year",
+        min = min(gapminder$year),
+        max = max(gapminder$year),
+        value = min(gapminder$year),
+        step = 5
+      ),
+      
+      selectInput(
+        inputId = "continent",
+        label = "Continent",
+        choices = c("Africa", "Americas", "Asia", "Europe", "Oceania", "All"),
+        selected = "All"
+      ),
+      
+      radioButtons(
+        inputId = "xaxis",
+        label = "X",
+        choices = c("Life expectancy" = "lifeExp", "Population" = "pop", "GDP per capita" = "gdpPercap"),
+        selected = "gdpPercap"
+      ),
+      
+      radioButtons(
+        inputId = "yaxis",
+        label = "Y",
+        choices = c("Life expectancy" = "lifeExp", "Population" = "pop", "GDP per capita" = "gdpPercap"),
+        selected = "lifeExp"
+      )
+    ),
+    
+    mainPanel(
+      plotOutput("scatterPlot")
+    )
+  )
+)
+
+# Server logic
+server <- function(input, output, session) {
+  
+  # Reactive filtered dataset
+  filtered_gapminder <- reactive({
+    data <- gapminder |>
+      filter(year == input$year)
+    if (input$continent != "All") {data <- data |> filter(continent == input$continent)}
+    
+    data
+  })
+  
+  # Interactive scatterplot
+  output$scatterPlot <- renderPlot({
+    
+    data <- filtered_gapminder()
+    
+    p <- data |>
+      ggplot(aes(x = .data[[input$xaxis]], y = .data[[input$yaxis]], size = pop, colour = country)) +
+      geom_point(alpha = 0.5, show.legend = FALSE) +
+      labs(x = variable_labels[[input$xaxis]], y = variable_labels[[input$yaxis]]) +
+      (if (input$xaxis %in% c("pop", "gdpPercap")) { scale_x_log10() }) +
+      (if (input$yaxis %in% c("pop", "gdpPercap")) { scale_y_log10() }) +
+      scale_colour_manual(values = country_colors) +
+      scale_size(range = c(2, 20)) +
+      theme_minimal() +
+      theme( plot.title = element_text(face = "bold", size = 18),
+             plot.subtitle = element_text(size = 12))
+    p
+  })
+}
+
+# Launch application
+shinyApp(ui, server)
+```
+
+### Challenge 2: App deploying
+
+CHALLENGE: "Create an account on Shinyapps.io and deploy your app there"
+
+After testing the application locally and connecting the shinyapps.io account, we can finally deploy the app. Let's load the `rsconnect` package.
+
+```{r load-rsconnect, eval=FALSE}
+library(rsconnect)
+```
+
+Now let's deploy the folder containing `app.R`.
+
+```{r deploy-current-directory, eval=FALSE}
+rsconnect::deployApp(
+  appDir = ".",
+  appName = "gapminder"
+)
+```
+
+The final deployed application is available at:
+
+```text
+https://rikypara04.shinyapps.io/gapminder/
+```
