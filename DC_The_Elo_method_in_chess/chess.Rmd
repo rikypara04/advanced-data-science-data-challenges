@@ -1,0 +1,486 @@
+---
+title: "The Elo Method in Chess"
+author: "Riccardo Paravano"
+output:
+  prettydoc::html_pretty:
+    theme: cayman
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache = FALSE,echo = TRUE,eval = TRUE,message = FALSE,warning = FALSE,fig.align = "center")
+```
+
+## Introduction
+
+The aim of this analysis is to study the results of 65,053 chess games and compare two ways of rating players:
+
+1. the **point rating**, obtained by assigning 1 point for a win, 0.5 points for a draw, and 0 points for a defeat;
+2. the **Elo rating**, which updates a player's rating according to the difference between the actual and expected result.
+
+```{r load-packages}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(readr)
+library(purrr)
+library(knitr)
+```
+
+## Data preparation
+
+After downloading the dataset, I stored the `data.csv` file in the same directory as this R Markdown document.
+
+```{r import-data}
+games <- read_csv("data.csv", show_col_types = FALSE)
+
+names(games)
+glimpse(games)
+```
+
+We remove all the "incomplete" rows.
+
+```{r add-id-column}
+games <- games |>
+  drop_na(White, Black, Score)
+
+glimpse(games)
+```
+
+# Challenge 1: Does White have a first-mover advantage?
+
+CHALLENGE: "Has White an advantage over Black, that is, is there a first-mover advantage?"
+
+We can use White's average score to investigate the first-mover advantage. A value greater than 0.5 indicates that White obtains, on average, more than half of the available point per game.
+
+Let's count the three possible outcomes.
+
+```{r game-results}
+game_results <- games |>
+  mutate(Result = ifelse(Score == 1, "White wins", ifelse(Score == 0.5, "Draw", "Black wins"))) |>
+  count(Result, sort = TRUE)
+
+game_results |>
+  head(5)|>
+  kable()
+```
+
+We can now compute White's average score directly from the `Score` variable.
+
+```{r white-average-score}
+white_score <- games |>
+  summarise(average_score = mean(Score), games = n())
+
+white_score |>
+  head(5)|>
+  kable()
+```
+
+We can verify the result by computing the same average score from `game_results`. White wins contribute 1 point, draws contribute 0.5 points, and Black wins contribute 0 points.
+
+```{r white-average-score-alternative}
+white_score <- game_results |>
+  mutate(score = ifelse(Result == "White wins", 1, ifelse(Result == "Draw", 0.5, 0))) |>
+  summarise(average_score = sum(n * score) / sum(n), games = sum(n))
+
+white_score |>
+  head(5)|>
+  kable()
+```
+
+The two methods produce the same average score. The first method is more direct because `Score` already contains White's score, while the second method reconstructs the average from the frequencies of the three possible outcomes.
+
+We now calculate the difference between White's average score and the neutral value of 0.5.
+
+```{r white-observed-advantage}
+white_score |>
+  mutate(advantage = average_score - 0.5) |>
+  head(5)|>
+  kable()
+```
+
+As we can see, `advantage` is greater than 0, which means that White has an observed first-mover advantage in this dataset.
+
+Finally, we can visually compare the average scores obtained by White and Black. Since the two scores sum to 1, a White average score greater than 0.5 corresponds to a Black average score lower than 0.5.
+
+```{r average-score-plot}
+average_scores <- games |>
+  summarise(White = mean(Score), Black = mean(1 - Score)) |>
+  pivot_longer(c(White, Black), names_to = "Colour", values_to = "AverageScore")
+
+ggplot(data = average_scores, mapping = aes(x = Colour, y = AverageScore, fill = Colour)) +
+  geom_bar(stat = "identity", width = 0.55, colour = "black", show.legend = FALSE) +
+  geom_text(mapping = aes(label = round(AverageScore, 3)), vjust = -0.5) +
+  geom_hline(yintercept = 0.5, linetype = "dashed") +
+  scale_fill_manual(values = c("Black" = "grey25", "White" = "white")) +
+  scale_y_continuous(limits = c(0, 0.6), breaks = seq(0, 0.6, 0.1)) +
+  labs(title = "Average score by colour", x = "Colour", y = "Average score") +
+  theme_minimal()
+```
+
+The dashed line represents the average score expected if neither colour had an advantage. White's average score is above 0.5, while Black's average score is below 0.5. The graph therefore provides visual evidence of an observed first-mover advantage for White in this dataset.
+
+# Challenge 2: Compute and study point ratings
+
+CHALLENGE: "Write a function that computes the player point rating (1 point for wins, 0.5 points for draws, 0 points for defeats). How are point ratings distributed? Why?"
+
+A player's point rating is the sum of the points obtained in all games. Each row of the original dataset contains two players, so we first use `pivot_longer()` to create one observation for each player in each game.
+
+The `Score` variable represents White's score. Therefore, after reorganizing the dataset, White's score remains unchanged, while Black's score is computed as `1 - Score`.
+
+```{r point-rating-function}
+compute_point_ratings <- function(data) {
+  data |>
+    pivot_longer(c(White, Black), names_to = "Colour", values_to = "Player") |>
+    mutate(Score = ifelse(Colour == "White", Score, 1 - Score)) |>
+    group_by(Player) |>
+    summarise(Games = n(), PointRating = sum(Score)) |>
+    arrange(desc(PointRating))
+}
+
+point_ratings <- compute_point_ratings(games)
+
+point_ratings |>
+  head(5)|>
+  kable()
+```
+
+The function assigns 1 point for a win, 0.5 points for a draw, and 0 points for a defeat. It then groups the observations by player and sums the scores to obtain each player's point rating.
+
+We can display the point-rating distribution using a histogram.
+
+```{r point-rating-distribution}
+ggplot(data = point_ratings) +
+  geom_histogram(mapping = aes(x = PointRating), binwidth = 5, colour = "white") +
+  labs(title = "Distribution of point ratings", x = "Point rating", y = "Number of players") +
+  theme_minimal()
+```
+
+The distribution is strongly right-skewed. Most players have relatively low point ratings, while a smaller number of players have accumulated many points.
+
+To understand why the point ratings are distributed in this way, we can also inspect the distribution of the number of games played.
+
+```{r games-distribution}
+ggplot(data = point_ratings) +
+  geom_histogram(mapping = aes(x = Games), binwidth = 5, colour = "white") +
+  labs(title = "Distribution of games played", x = "Games played", y = "Number of players") +
+  theme_minimal()
+```
+
+The number of games played is also strongly right-skewed. Most players have played relatively few games, while a small number of players have played many games. Since the point rating is cumulative, players who play more games have more opportunities to obtain points. Therefore, the distribution of point ratings depends both on player performance and on the number of games played.
+
+# Challenge 3: Formally prove the zero-sum property
+
+CHALLENGE: "Formally show that the sum of all Elo ratings is always 0."
+
+Let \(P\) be the set of all players and let \(i,j \in P\) be the two players involved in a game, with \(i \neq j\). We use the following notation:
+
+- \(r_i\) and \(r_j\) are the ratings of players \(i\) and \(j\) before the game;
+- \(r_i'\) and \(r_j'\) are the ratings of players \(i\) and \(j\) after the game;
+- \(s_{i,j}\) and \(s_{j,i}\) are the actual scores obtained by players \(i\) and \(j\);
+- \(\mu_{i,j}\) and \(\mu_{j,i}\) are the expected scores of players \(i\) and \(j\);
+- \(\kappa > 0\) is the constant that determines the size of each rating update.
+
+The updated ratings of players \(i\) and \(j\) are:
+
+\[
+r_i' = r_i + \kappa(s_{i,j} - \mu_{i,j})
+\]
+
+and
+
+\[
+r_j' = r_j + \kappa(s_{j,i} - \mu_{j,i}).
+\]
+
+Adding the two equations gives:
+
+\[
+\begin{aligned}
+r_i' + r_j'
+&= r_i + r_j + \kappa\left[(s_{i,j} - \mu_{i,j}) + (s_{j,i} - \mu_{j,i})\right] \\
+&= r_i + r_j + \kappa\left[(s_{i,j} + s_{j,i}) - (\mu_{i,j} + \mu_{j,i})\right].
+\end{aligned}
+\]
+
+Since a game distributes exactly one point between the two players,
+
+\[
+s_{i,j} + s_{j,i} = 1,
+\]
+
+and since their expected scores are complementary,
+
+\[
+\mu_{i,j} + \mu_{j,i} = 1.
+\]
+
+Therefore,
+
+\[
+\begin{aligned}
+r_i' + r_j'
+&= r_i + r_j + \kappa(1 - 1) \\
+&= r_i + r_j.
+\end{aligned}
+\]
+
+Thus, the game does not change the sum of the ratings of the two players involved.
+
+To extend this result to all players, let \(r_p^{(t)}\) denote the rating of player \(p \in P\) after \(t\) games, and define the total rating after \(t\) games as:
+
+\[
+R^{(t)} = \sum_{p \in P} r_p^{(t)}.
+\]
+
+Suppose that players \(i\) and \(j\) play game \(t+1\). Their combined rating is unchanged, while every player \(p \in P \setminus \{i,j\}\) is not involved in the game and therefore satisfies:
+
+\[
+r_p^{(t+1)} = r_p^{(t)}.
+\]
+
+Consequently,
+
+\[
+\begin{aligned}
+R^{(t+1)}
+&= r_i^{(t+1)} + r_j^{(t+1)} + \sum_{p \in P \setminus \{i,j\}} r_p^{(t+1)} \\
+&= r_i^{(t)} + r_j^{(t)} + \sum_{p \in P \setminus \{i,j\}} r_p^{(t)} \\
+&= R^{(t)}.
+\end{aligned}
+\]
+
+We can now prove the zero-sum property by induction on the number of games.
+
+**Base case.** Before any game is played, every player has rating 0. Hence:
+
+\[
+R^{(0)} = \sum_{p \in P} r_p^{(0)} = 0.
+\]
+
+**Inductive step.** Assume that after \(t\) games the total rating is 0, that is, \(R^{(t)}=0\). Since game \(t+1\) preserves the total rating,
+
+\[
+R^{(t+1)} = R^{(t)} = 0.
+\]
+
+Therefore, by induction,
+
+\[
+\boxed{\sum_{p \in P} r_p^{(t)} = 0 \quad \text{for every } t \geq 0.}
+\]
+
+Hence, the Elo rating system satisfies the zero-sum property.
+
+# Challenge 4: Compute and study Elo ratings
+
+CHALLENGE: "Write a function that computes the player Elo rating (set \(\zeta = 400\) and \(\kappa = 25\))(Hint: take advantage of the 0-sum property to optimize the code). Observe its distribution: why is it different from the point-rating distribution? Verify the zero-sum property for Elo ratings."
+
+The expected score of player \(i\) against player \(j\) is:
+
+\[
+\mu_{i,j} = \frac{1}{1 + 10^{-(r_i-r_j)/\zeta}}.
+\]
+
+The games must be processed in their original order because the rating update after each game depends on the ratings obtained from all previous games.
+
+The player identifiers in the dataset are positive integers. Therefore, they can be used directly as positions in the rating vector.
+
+Moreover, from the zero-sum property proved in Challenge 3, the rating change of Black is the opposite of the rating change of White. Therefore, we only need to compute one change for each game.
+
+```{r elo-function}
+compute_elo_ratings <- function(data, zeta = 400, kappa = 25) {
+  # Find the largest player identifier to determine the required vector length
+  # For data = games, the largest player identifier is 8631
+  max_player_id <- max(c(data$White, data$Black))
+
+  # Initially, every player has rating 0 and has played 0 games
+  ratings <- rep(0, max_player_id)
+  games_played <- rep(0, max_player_id)
+
+  # Process the games one at a time and in their original order
+  for (g in 1:nrow(data)) {
+    # Select the two players and White's actual score in game g
+    white_player <- data$White[g]
+    black_player <- data$Black[g]
+    white_score <- data$Score[g]
+
+    # Compute White's expected score using the ratings before game g
+    white_expected <- 1 / (1 + 10^(-(ratings[white_player] - ratings[black_player]) / zeta))
+
+    # Compute the rating points transferred between the two players
+    change <- kappa * (white_score - white_expected)
+
+    # Add the change to White and subtract the same change from Black
+    ratings[white_player] <- ratings[white_player] + change
+    ratings[black_player] <- ratings[black_player] - change
+
+    # Increase the number of games played by both players
+    games_played[white_player] <- games_played[white_player] + 1
+    games_played[black_player] <- games_played[black_player] + 1
+  }
+
+  # Create the final table and remove unused vector positions
+  data.frame(Player = 1:max_player_id, EloRating = ratings, Games = games_played) |>
+    filter(Games > 0) |>
+    arrange(desc(EloRating))
+}
+
+elo_ratings <- compute_elo_ratings(games, zeta = 400, kappa = 25)
+
+elo_ratings |>
+  head(5)|>
+  kable()
+
+elo_ratings |>
+  summarise(MinimumElo = min(EloRating), MaximumElo = max(EloRating), TotalElo = sum(EloRating)) |>
+  mutate(TotalElo = format(TotalElo, scientific = TRUE, digits = 7))|> # Otherwise kable approximate TotalElo to 0
+  kable()
+```
+
+The minimum and maximum Elo ratings are respectively \(-146.4557\) and \(326.9503\). The total Elo rating is \(7.638334 \times 10^{-13} = 0.0000000000007638334\), a value extremely close to 0. The small difference from exactly 0 is due to numerical approximation and confirms the zero-sum property of the Elo rating system.
+
+We can now display the distribution of the final Elo ratings.
+
+```{r elo-rating-distribution}
+ggplot(data = elo_ratings) +
+  geom_histogram(mapping = aes(x = EloRating), binwidth = 10, colour = "white") +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  labs(title = "Distribution of Elo ratings", x = "Elo rating", y = "Number of players") +
+  theme_minimal()
+```
+
+The Elo-rating distribution is different from the point-rating distribution. Point ratings are cumulative and cannot be negative: players continue to collect points when they win or draw, so players who play more games have more opportunities to obtain a high point rating. Elo ratings, instead, can increase or decrease. A player gains rating after performing better than expected and loses rating after performing worse than expected. The size of the change also depends on the ratings of the two players before the game. Therefore, Elo measures relative performance rather than the simple accumulation of points, and its distribution is centred around 0.
+
+# Challenge 5: Compare point and Elo ratings
+
+CHALLENGE: "Are point and Elo ratings correlated? Are top Elo players overlapping with top point players?"
+
+Both tables use the numeric variable `Player` to identify players. Therefore, we can combine point and Elo ratings with `inner_join()`.
+
+```{r merge-ratings}
+player_ratings <- point_ratings |>
+  inner_join(select(elo_ratings, Player, EloRating), join_by(Player))
+
+player_ratings |>
+  head(5)|>
+  kable(digits = 1)
+```
+
+We use a scatterplot to study the covariation between point and Elo ratings. Each point represents one player, while the smooth line shows the general relationship between the two ratings.
+
+```{r compare-ratings-plot}
+ggplot(data = player_ratings, mapping = aes(x = PointRating, y = EloRating)) +
+  geom_point(alpha = 0.2) +
+  geom_smooth(se = FALSE) +
+  labs(title = "Point rating and Elo rating", x = "Point rating", y = "Elo rating") +
+  theme_minimal()
+```
+
+The increasing trend shows that point and Elo ratings are positively associated: players with higher point ratings tend to have higher Elo ratings. However, the points do not follow the smooth line perfectly, so the two ratings do not produce exactly the same ranking. This difference is expected because point rating is cumulative, while Elo rating also considers expected performance and the opponent's current rating.
+
+We now compare the 5 players with the highest point ratings and the 5 players with the highest Elo ratings.
+
+```{r top-20-players}
+top_point_players <- player_ratings |>
+  arrange(desc(PointRating)) |>
+  head(5) |>
+  select(Player, PointRating)
+
+top_elo_players <- player_ratings |>
+  arrange(desc(EloRating)) |>
+  head(5) |>
+  select(Player, EloRating)
+
+top_point_players |>
+  kable(digits = 1)
+
+top_elo_players |>
+  kable(digits = 1)
+```
+
+The players appearing in both groups are obtained using `intersect()`.
+
+```{r top-20-overlap}
+top_players_in_both <- intersect(select(top_point_players, Player), select(top_elo_players, Player))
+
+top_players_in_both |>
+  kable()
+
+nrow(top_players_in_both)
+```
+
+None of the top 5 players by point rating appear among the top 5 players by Elo rating. Therefore, although point and Elo ratings show a positive overall association, the two methods identify completely different players at the very top of their rankings.
+
+Since the result for one top-group size may depend on the chosen cut-off, we also compare the overlap among the top 10, 20, 50, and 100 players. These values measure **overlap percentages**, not correlations.
+
+```{r overlap-function}
+compute_top_overlap <- function(data, top_n) {
+  top_point <- data |>
+    arrange(desc(PointRating)) |>
+    head(top_n) |>
+    select(Player)
+
+  top_elo <- data |>
+    arrange(desc(EloRating)) |>
+    head(top_n) |>
+    select(Player)
+
+  players_in_both <- intersect(top_point, top_elo)
+
+  data.frame(TopPlayers = top_n, PlayersInBoth = nrow(players_in_both), OverlapPercentage = 100 * nrow(players_in_both) / top_n)
+}
+
+overlap_comparison <- bind_rows(
+  compute_top_overlap(player_ratings, 10),
+  compute_top_overlap(player_ratings, 20),
+  compute_top_overlap(player_ratings, 50),
+  compute_top_overlap(player_ratings, 100)
+)
+
+overlap_comparison |>
+  kable()
+```
+
+We can display how the overlap changes as the size of the top-player group increases.
+
+```{r overlap-comparison-plot}
+ggplot(data = overlap_comparison, mapping = aes(x = TopPlayers, y = OverlapPercentage)) +
+  geom_line() +
+  geom_point(size = 3) +
+  scale_x_continuous(breaks = c(10, 20, 50, 100)) +
+  scale_y_continuous(limits = c(0, 100)) +
+  labs(title = "Overlap between top point and Elo players", x = "Number of top players considered", y = "Overlap percentage") +
+  theme_minimal()
+```
+
+The overlap increases substantially as the size of the top-player group grows: it is 10% for the top 10 players, 30% for the top 20, 52% for the top 50, and 53% for the top 100. Therefore, point and Elo ratings identify very different players at the very top of their rankings, but the two rankings become more similar when broader groups are considered. However, the overlap stabilizes at just above 50% between the top 50 and top 100, showing that substantial differences between the two rating methods remain even for larger groups of players.
+
+# Challenge 6: Does the number of games affect the ratings?
+
+CHALLENGE: "Test if the number of played games has an effect on the Elo and point player ratings."
+
+The `Games` variable counts the number of games played by each player. We first study its relationship with point rating.
+
+```{r games-point-rating}
+ggplot(data = player_ratings, mapping = aes(x = Games, y = PointRating)) +
+  geom_point(alpha = 0.2) +
+  geom_smooth(se = FALSE) +
+  labs(title = "Games played and point rating", x = "Games played", y = "Point rating") +
+  theme_minimal()
+```
+
+The scatterplot shows a strong, almost linear positive relationship between the number of games played and point rating. Players with only a few games are concentrated near a point rating of 0, while players with more than 200 games generally have point ratings above 100. The points also remain relatively close to the smooth line across most of the graph. This result is expected because point rating is cumulative: every additional game gives a player another opportunity to obtain 1 point for a win or 0.5 points for a draw. Therefore, the number of games played is strongly associated with point rating.
+
+We then study the relationship between the number of games played and Elo rating.
+
+```{r games-elo-rating}
+ggplot(data = player_ratings, mapping = aes(x = Games, y = EloRating)) +
+  geom_point(alpha = 0.2) +
+  geom_smooth(se = FALSE) +
+  labs(title = "Games played and Elo rating", x = "Games played", y = "Elo rating") +
+  theme_minimal()
+```
+
+The relationship between games played and Elo rating is positive overall, but it is weaker, less regular, and clearly non-linear. Among players with few games, Elo ratings are widely dispersed around 0 and include both positive and negative values. The smooth line decreases slightly at first, then increases as the number of games grows, and eventually levels off at approximately 180 Elo points for the most active players. Even among players with a similar number of games, the vertical dispersion remains large, showing that activity alone does not determine Elo rating. 
