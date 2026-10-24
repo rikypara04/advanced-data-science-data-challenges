@@ -1,0 +1,620 @@
+---
+title: "Blockchain Footprint"
+subtitle: "Energy consumption and the environmental footprint of blockchain technology"
+author: "Riccardo Paravano"
+output:
+  ioslides_presentation:
+    css: style.css
+    incremental: yes
+    widescreen: yes
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,message = FALSE,warning = FALSE,fig.align = "center",out.width = "100%")
+
+library(ggplot2)
+library(scales)
+library(rvest)
+library(dplyr)
+library(tidyr)
+library(readr)
+```
+
+## <span class="title-opening">The question behind the headline</span>
+
+> Are blockchains really destroying our planet?
+
+- The debate is often affected by **cliches, biases, misconceptions and pitfalls**
+- Different blockchains do not necessarily have the same electricity consumption
+- The main difference is the method used to reach consensus over the state of the system
+- We must distinguish **electricity consumption** from the wider **environmental footprint**
+
+<div class="takeaway">Main claim: the word “blockchain” alone is not a sufficient unit of environmental analysis.</div>
+
+## <span class="title-opening">Road map</span>
+
+1. Blockchain as part of the ***Web3 ecosystem***
+2. Proof of Work and block production
+3. The economics of Bitcoin mining
+4. How Bitcoin electricity consumption is estimated
+5. Electricity consumption and environmental footprint
+6. Proof of Work and Proof of Stake
+7. Mitigation options and conclusions
+
+<div class="takeaway">The Web3 ecosystem is a collection of blockchain-based technologies and applications designed to let users exchange digital assets and interact with decentralized services without relying exclusively on a central intermediary.</div>
+
+## <span class="title-mechanism">Blockchain state and consensus</span>
+A blockchain system must maintain an agreed state across a network of participants.
+
+- Transactions describe proposed changes to the state
+- Participants verify transactions according to common rules
+- A **consensus mechanism** determines which valid history is accepted
+- In a **trustless environment**, agreement does not depend on personal trust between participants
+
+<div class="takeaway">The environmental question begins with the mechanism used to secure agreement over the state of the system.</div>
+
+## <span class="title-mechanism">Why consensus has an environmental cost</span>
+- The network needs a **consensus mechanism** to agree on which transactions and blocks belong to the accepted blockchain history
+- In **Proof of Work**, miners create candidate blocks and compete to find a valid cryptographic result
+- Finding this result requires a very large number of repeated hash calculations
+- The first miner to find a valid result can broadcast the candidate block to the network
+- Other participants can quickly verify the result and accept the valid block
+
+<div class="takeaway">Proof of Work uses computational effort and electricity to make block production costly and attacks economically difficult.</div>
+
+## <span class="title-mechanism">Mining effort and block contents</span>
+- The **Proof-of-Work difficulty** does not depend significantly on the number of transactions included in a candidate block
+- Instead, the difficulty is adjusted according to the rules of the blockchain protocol, usually in response to how quickly recent blocks were produced
+- Its purpose is to keep block production close to the target rate defined by the protocol, even when the total network hashrate changes
+- A block containing many transactions requires some additional validation and network communication
+- However, the number of transactions does not significantly affect the probability of finding a valid **Proof-of-Work hash**
+- Therefore, at the same difficulty, blocks with few or many transactions require the same expected number of hash attempts on average
+
+<div class="takeaway">Adding one more transaction does not cause a proportional increase in the blockchain’s electricity consumption.</div>
+
+## <span class="title-mechanism">Market capitalisation and power demand across Proof-of-Work networks</span>
+The study analysed **20 Proof-of-Work cryptocurrencies** that collectively represented approximately **98.22% of the total market capitalisation of mineable cryptocurrencies in 2020**.
+
+**Market capitalisation** measures the total market value of a cryptocurrency and is calculated by multiplying its market price by the number of coins in circulation:
+
+$$
+\text{Market capitalisation} = \text{price per coin} \times \text{circulating supply}
+$$
+```{r pow-network-comparison, fig.width=10, fig.height=5, out.width="95%"}
+source_url <- "http://large.stanford.edu/courses/2023/ph240/emam1/"
+cache_file <- "data/pow_network_power_share.csv"
+
+if (!dir.exists("data")) dir.create("data")
+
+if (!file.exists(cache_file)) {
+  source_tables <- read_html(source_url) |> html_table(fill = TRUE)
+  source_table <- source_tables[[1]]
+  first_group <- source_table[, 1:3]
+  second_group <- source_table[, 4:6]
+  names(first_group) <- c("Network", "MarketCapShare", "RatedPowerShare")
+  names(second_group) <- c("Network", "MarketCapShare", "RatedPowerShare")
+  pow_data <- bind_rows(first_group, second_group) |> filter(Network != "") |> mutate(MarketCapShare = as.numeric(MarketCapShare), RatedPowerShare = as.numeric(RatedPowerShare))
+  write.csv(pow_data, cache_file, row.names = FALSE)
+}
+
+pow_plot <- read.csv(cache_file) |>
+  arrange(desc(MarketCapShare)) |>
+  mutate(Network = factor(Network, levels = Network)) |>
+  pivot_longer(c(MarketCapShare, RatedPowerShare), names_to = "Measure", values_to = "Share") |>
+  mutate(Measure = recode(Measure, MarketCapShare = "Market capitalisation", RatedPowerShare = "Estimated rated power"))
+
+ggplot(data = pow_plot, mapping = aes(x = Network, y = Share, fill = Measure)) +
+  geom_col(position = "dodge") +
+  scale_y_continuous(labels = label_percent(scale = 1)) +
+  labs(title = "Market capitalisation and estimated rated power in 2020", x = NULL, y = "Share (%)", fill = NULL) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+- Ethereum refers to its **pre-Merge Proof-of-Work network**
+
+<div class="takeaway">Market value and mining power are related but not proportional: a network's share of market capitalisation does not directly determine its share of Proof-of-Work power demand.</div>
+
+<div class="source"><strong>Data source:</strong> Emam, R. (2023), <em>Cryptocurrency: An Analysis of Energy Usage</em>, reproducing data from Gallersdörfer, U., Klaaßen, L. and Stoll, C. (2020), <em>Energy Consumption of Cryptocurrencies Beyond Bitcoin</em>. <a href="http://large.stanford.edu/courses/2023/ph240/emam1/" target="_blank">View the reproduced table on the Stanford University course website</a>.</div>
+
+## <span class="title-economics">Proof of Work as an economic incentive</span>
+- Miners voluntarily incur financial costs before knowing whether they will receive a reward
+- Dishonest behaviour can leave the miner with sunk costs but no block reward
+- If miners are profit-maximising agents, following the rules becomes the rational strategy
+- Bitcoin can therefore be viewed as a **socio-economic system** combining:
+  - technical rules that define valid transactions and blocks
+  - economic incentives that reward accepted blocks
+  - strategic competition among miners, for whom following the protocol is generally more profitable than cheating
+
+<div class="takeaway">Proof of Work promotes honesty over cheating by making dishonest behaviour economically costly.</div>
+
+## <span class="title-economics">The costs and revenues of miners</span>
+Mining profitability depends on the relationship between **mining revenues** and **mining costs**:
+
+>* **Capital expenditures:** initial investments in mining infrastructure and **Application-Specific Integrated Circuits (ASICs)**, specialised computers designed to perform a specific Proof-of-Work algorithm
+>* **Operational expenditures:** recurring costs, mainly electricity, cooling, maintenance, and personnel
+>* **Block subsidy:** newly issued coins awarded to the miner who successfully produces an accepted block
+>* **Transaction fees:** payments included by users to incentivise miners to include their transactions in a block
+
+> **Expected profit** = **block subsidy** + **transaction fees** - **capital expenditures** - **operational expenditures**
+
+```{r mining-cost-revenue-structure, fig.width=9, fig.height=4.2}
+mining_structure <- data.frame(
+  Category = c("Mining revenue in 2024", "Mining revenue in 2024", "Operating expenditure", "Operating expenditure"),
+  Component = c("Block subsidy", "Transaction fees", "Direct electricity", "Other operating expenses"),
+  Share = c(94.0, 6.0, 81.1, 18.9)
+)
+
+ggplot(data = mining_structure, mapping = aes(x = Category, y = Share, fill = Component)) +
+  geom_col() +
+  coord_flip() +
+  scale_y_continuous(labels = label_percent(scale = 1)) +
+  labs(title = "Reported revenue and operating-cost composition", x = NULL, y = "Share (%)", fill = NULL) +
+  theme_minimal()
+```
+
+- In 2024, transaction fees represented approximately **6% of total mining rewards**, while the block subsidy provided the remaining **94%**
+- In the surveyed firms, direct electricity represented **81.1% of cash operating expenditure**, while other operating expenses represented **18.9%**
+- The operating-cost bar excludes capital expenditure and non-cash expenses, so it does not represent the miner's complete lifetime cost structure
+
+<div class="takeaway">Mining revenue still depends mainly on the block subsidy, while electricity dominates recurring cash operating costs.</div>
+
+<div class="source"><strong>Data:</strong> Cambridge Centre for Alternative Finance (2025), <em>Cambridge Digital Mining Industry Report</em>, Figures 39 page 81-82 (“Transaction fees in 2024 still only accounted for approximately 6% of total mining rewards.”) and 44(b) page 87. <a href="https://issuu.com/cambridgejbs/docs/cambridge_digital_mining_industry_report" target="_blank">View the report</a>.</div>
+
+
+## <span class="title-economics">Mining infrastructure</span>
+```{r mining-image, out.width="72%", fig.align="center"}
+if (!dir.exists("images")) {
+  dir.create("images")
+}
+
+image_path <- "images/cryptocurrency-mining-farm.jpg"
+image_url <- paste0(
+  "https://upload.wikimedia.org/wikipedia/commons/thumb/3/37/",
+  "Cryptocurrency_Mining_Farm.jpg/1280px-Cryptocurrency_Mining_Farm.jpg"
+)
+
+image_is_missing <- !file.exists(image_path) ||
+  file.info(image_path)$size == 0
+
+if (image_is_missing) {
+  download.file(
+    url = image_url,
+    destfile = image_path,
+    mode = "wb",
+    method = "libcurl",
+    quiet = FALSE
+  )
+}
+
+if (!file.exists(image_path) || file.info(image_path)$size == 0) {
+  stop("The mining-facility image could not be downloaded.")
+}
+
+knitr::include_graphics(image_path)
+```
+
+>* Industrial mining combines specialised **Application-Specific Integrated Circuit (ASIC) hardware**, electricity supply, cooling, and network connectivity
+>* Location and electricity contracts strongly influence operating costs and environmental impact
+
+<div class="source"><strong>External image:</strong> “Cryptocurrency Mining Farm”, Wikimedia Commons. <a href="https://commons.wikimedia.org/wiki/File:Cryptocurrency_Mining_Farm.jpg" target="_blank">View the original image and licence information</a>.</div>
+
+
+## <span class="title-economics">The main driver: expected mining profitability</span>
+- The main driver of Proof-of-Work electricity consumption is **expected mining profitability**
+- Main revenue factors:
+  - market price of the mined coin
+  - block reward
+  - transaction fees
+- Main cost factor:
+  - electricity price
+
+<div class="takeaway">coin price, fees and electricity price strongly influence the energy footprint.</div>
+
+## <span class="title-economics">Measuring mining hardware efficiency</span>
+- A **hash** is one attempt to find a valid Proof-of-Work result
+- One **terahash (TH)** represents one trillion hash calculations
+- Hardware efficiency is measured in **joules per terahash (J/TH)**, meaning the energy required to perform one trillion hashes
+- A lower J/TH value means that the hardware performs the same computational work using less electricity
+
+> **Example:** a device operating at **100 TH/s** with an efficiency of **25 J/TH** requires approximately **2,500 W**  
+> $100\ \text{TH/s} \times 25\ \text{J/TH} = 2{,}500\ \text{J/s} = 2{,}500\ \text{W}$
+
+<div class="takeaway">J/TH measures the electricity required for a unit of computational work: lower values indicate more efficient hardware.</div>
+
+## <span class="title-economics">From profitability to active hardware</span>
+Hardware efficiency affects operating costs, but whether a machine remains active also depends on:
+
+>* **Hashprice:** daily mining revenue earned for each petahash per second of computational power (**1 PH/s equals 1,000 TH/s and is used to avoid expressing revenue with very small decimal values**)
+>* **Electricity price:** cost of the electricity required to operate the machine
+
+The percentage shown in each cell is the **hash margin**:
+
+$$
+\text{Hash margin}
+=
+\frac{\text{hashprice}-\text{electricity cost}}
+{\text{hashprice}}
+\times 100
+$$
+
+```{r profitability-hardware-heatmap, fig.width=9, fig.height=4.8}
+hashprice <- 54.3
+
+hash_margin <- expand.grid(
+  ElectricityRate = c(20, 40, 60, 80, 100),
+  Efficiency = c(15, 20, 25, 30, 35, 40, 45)
+) |>
+  mutate(
+    ElectricityCost = Efficiency * 24 * ElectricityRate / 1000,
+    Margin = round(100 * (hashprice - ElectricityCost) / hashprice)
+  )
+
+ggplot(data = hash_margin, mapping = aes(x = Efficiency, y = ElectricityRate, fill = Margin)) +
+  geom_tile() +
+  geom_text(mapping = aes(label = paste0(Margin, "%"))) +
+  scale_x_continuous(breaks = c(15, 20, 25, 30, 35, 40, 45)) +
+  scale_y_continuous(breaks = c(20, 40, 60, 80, 100)) +
+  labs(
+    title = "Estimated Bitcoin mining margin on 31 December 2024",
+    x = "Hardware efficiency (J/TH; lower is more efficient)",
+    y = "Electricity price (USD/MWh)",
+    fill = "Hash margin (%)"
+  ) +
+  theme_minimal()
+```
+
+- A **positive margin** means that expected mining revenue exceeds electricity costs
+- A **negative margin** means that operating the machine costs more than its expected revenue
+- Higher electricity prices make less-efficient hardware unprofitable first
+- A higher hashprice can allow additional hardware to operate profitably
+
+> **Profitability decreases**  
+> less-efficient machines become unprofitable  
+> $\rightarrow$ machines are switched off  
+> $\rightarrow$ network hashrate and electricity demand can decrease
+
+> **Profitability increases**  
+> additional machines become profitable  
+> $\rightarrow$ machines can be activated  
+> $\rightarrow$ network hashrate and electricity demand can increase
+
+<div class="takeaway">Hardware efficiency determines operating cost, while hashprice and electricity price determine whether operating that hardware is profitable.</div>
+
+<div class="source"><strong>Data and methodology:</strong> Cambridge Centre for Alternative Finance (2025), <em>Cambridge Digital Mining Industry Report</em>, Figure 50(a), p. 92. Calculations assume a Bitcoin hashprice of <strong>$54.3/PH/day</strong> on 31 December 2024. <a href=https://issuu.com/cambridgejbs/docs/cambridge_digital_mining_industry_report" target="_blank">View the report</a>.</div>
+
+## <span class="title-economics">Hashrate can grow faster than electricity consumption</span>
+From the beginning of 2021 to the end of 2024, Bitcoin's computational power and electricity consumption both increased, but not at the same rate.
+
+```{r hashrate-electricity-growth, fig.width=9, fig.height=4}
+network_growth <- data.frame(
+  Metric = c("Network hashrate", "Annualised electricity consumption"),
+  Change = c(455, 111)
+)
+
+ggplot(data = network_growth, mapping = aes(x = Metric, y = Change, fill = Metric)) +
+  geom_col(show.legend = FALSE) +
+  labs(title = "Cumulative change from 2021 to 2024", x = NULL, y = "Increase (%)") +
+  theme_minimal()
+```
+
+- Bitcoin's network hashrate increased by approximately **455%**
+- Annualised electricity consumption increased by approximately **111%**
+- Estimated hardware efficiency improved from slightly above **60 J/TH** to approximately **23.7 J/TH**
+
+<div class="takeaway">Efficiency improvements reduced electricity per hash, so computational power increased much faster than total electricity consumption.</div>
+
+<div class="source"><strong>Data:</strong> Cambridge Centre for Alternative Finance (2025), <em>Cambridge Digital Mining Industry Report</em>, Figure 27 page 61, and Figure 28 page 62 (“Efficiency at the beginning of the observed period [...] stood slightly above 60 J/TH [...] before gradually improving to 23.7 J/TH by the end of 2024.”, “The implied network hashrate [...] surged by 455% from 143 EH/s to 796 EH/s over the same period.”). <a href="https://issuu.com/cambridgejbs/docs/cambridge_digital_mining_industry_report" target="_blank">View the report</a></div>
+
+## <span class="title-estimation">How CBECI estimates electricity consumption</span>
+The **Cambridge Bitcoin Electricity Consumption Index (CBECI)** is maintained by the Cambridge Digital Assets Programme at the Cambridge Centre for Alternative Finance.
+
+The complete hardware operating across the Bitcoin network cannot be observed directly. CBECI therefore estimates electricity consumption by combining:
+
+>* the observable network **hashrate**
+>* a database of mining devices and their efficiencies
+>* mining revenue and an assumed electricity price
+>* the profitability mechanism introduced in the previous slide
+
+The model produces three scenarios:
+
+>* **Theoretical lower bound:** assumes that all mining uses the most efficient available hardware
+>* **Best estimate:** assumes a plausible combination of profitable mining devices
+>* **Theoretical upper bound:** assumes the least-efficient hardware that could still operate profitably
+
+The estimated hardware mix is used to convert network hashrate into power demand and annualised electricity consumption.
+
+<div class="takeaway">CBECI applies the profitability mechanism to estimate which hardware may be active and how much electricity that hardware requires.</div>
+
+<div class="source"><strong>Methodology:</strong> Cambridge Centre for Alternative Finance, <em>Cambridge Bitcoin Electricity Consumption Index</em>. The model combines network hashrate, mining revenue, electricity-price assumptions, and a basket of real mining hardware to produce lower-bound, best-estimate, and upper-bound scenarios. <a href="https://ccaf.io/cbnsi/cbeci/methodology" target="_blank">View the CBECI methodology</a>.</div>
+
+## <span class="title-estimation">Survey-based calculation: a real example</span>
+The 2025 Cambridge Digital Mining Industry Report provides an independent calculation based on operational data reported directly by mining firms.
+
+Researchers surveyed **49 mining firms** active in **23 countries**, together representing approximately **48% of the global Bitcoin hashrate**.
+
+The firms reported the efficiency of their operational hardware. Each response was weighted by the firm's reported hashrate, so larger mining operations had more influence on the resulting estimate.
+
+> **Data for 30 June 2024**  
+> Network hashrate: **558.7 EH/s** = **558.7 million TH/s**  
+> Hashrate-weighted hardware efficiency: **28.2 J/TH**
+
+> **Estimated power demand**  
+> $558.7$ million TH/s $\times 28.2$ J/TH  
+> $= 15.8$ billion J/s $\approx$ **15.8 GW**
+
+> **Annualised electricity consumption**  
+> $15.8$ GW $\times 8{,}760$ hours/year  
+> $\approx$ **138.2 TWh/year**
+
+**Annualised consumption** is the electricity that would be consumed if the estimated power demand remained constant for one complete year. It is a projection based on the estimated power rate, not necessarily electricity already consumed during the calendar year.
+
+<div class="takeaway">The survey provides an independent estimate based on reported hardware efficiency, rather than inferring the active hardware mix through profitability assumptions.</div>
+
+<div class="source"><strong>Data and methodology:</strong> Cambridge Centre for Alternative Finance (2025), <em>Cambridge Digital Mining Industry Report</em>, Figure 26(a), p. 60, and Figure 29, p. 63. Figure 26(a) reports a hashrate-weighted ASIC efficiency of <strong>28.2 J/TH</strong> as of 30 June 2024. Figure 29 combines this efficiency with an implied network hashrate of <strong>558.7 EH/s</strong>, producing a survey-based estimate of <strong>138.2 TWh/year</strong>. <a href="https://issuu.com/cambridgejbs/docs/cambridge_digital_mining_industry_report" target="_blank">View the report</a>.</div>
+
+## <span class="title-estimation">Environmental scale of Bitcoin mining</span>
+The survey-based calculation and the separate CBECI model produced similar electricity estimates for the same period:
+
+>* **Survey-based estimate:** 138.2 TWh/year
+>* **CBECI model estimate:** 137.4 TWh/year
+
+The similarity provides a useful cross-check because the two methods estimate the mining hardware differently.
+
+The report placed the survey-based result in a broader environmental context:
+
+>* approximately **0.54% of global annual electricity consumption**
+>* approximately **39.8 MtCO2e/year** of greenhouse-gas emissions
+
+Electricity consumption measures the amount of electrical energy used. Greenhouse-gas emissions also depend on the **carbon intensity of the energy sources** supplying mining operations.
+
+<div class="takeaway">The two methods agree on the approximate scale of electricity consumption, but the environmental impact also depends on how that electricity is generated.</div>
+
+<div class="source"><strong>Data and methodology:</strong> Cambridge Centre for Alternative Finance (2025), <em>Cambridge Digital Mining Industry Report</em>, Figure 29, page 63, and Figure 32, page 69. The report states that the survey-based estimate of <strong>138.2 TWh/year</strong> as of 30 June 2024 represented approximately <strong>0.54% of global annual electricity consumption</strong> and closely aligned with the separate CBECI estimate of <strong>137.4 TWh/year</strong>. Figure 32 reports a survey-based emission intensity of <strong>288.2 gCO2e/kWh</strong>, which corresponds to approximately <strong>39.8 MtCO2e/year</strong> when applied to the estimated electricity consumption. <a href="https://issuu.com/cambridgejbs/docs/cambridge_digital_mining_industry_report" target="_blank">View the report</a>.</div>
+
+## <span class="title-footprint">Reported Bitcoin mining energy mix</span>
+```{r energy-mix-chart, fig.width=9, fig.height=4.3}
+energy_mix <- data.frame(Source = c("Renewables", "Natural gas", "Nuclear", "Coal", "Other"), Share = c(42.6, 38.2, 9.8, 8.9, 0.5))
+
+ggplot(data = energy_mix, mapping = aes(x = reorder(Source, Share), y = Share, fill = Source)) +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  labs(title = "Reported Bitcoin mining energy mix", x = NULL, y = "Share of reported energy mix (%)", caption = "Data: Cambridge Digital Mining Industry Report (2025)") +
+  theme_minimal()
+```
+
+- Renewables and nuclear together represent the reported **52.4% sustainable-energy share**
+- The energy mix refers to the report’s sample and period, not a permanent global value
+
+<div class="source"><strong>Data and methodology:</strong> Cambridge Centre for Alternative Finance (2025), <em>Cambridge Digital Mining Industry Report</em>, Figure 31(a), page 67. Based on survey responses weighted by participants' reported power consumption, the report estimates that the electricity mix as of 30 June 2024 consisted of <strong>42.6% renewables</strong>, <strong>38.2% natural gas</strong>, <strong>9.8% nuclear</strong>, <strong>8.9% coal</strong>, and <strong>0.5% oil</strong>. Renewables and nuclear together form the reported <strong>52.4% sustainable-energy share</strong>.<a href="https://issuu.com/cambridgejbs/docs/cambridge_digital_mining_industry_report" target="_blank">View the report</a>.</div>
+
+## <span class="title-footprint">Electricity consumption is not environmental footprint</span>
+> What ultimately matters for the environment is not electricity consumption per se, but the carbon intensity of the energy sources used to generate it.
+
+$$\text{GHG emissions}=\sum_i \text{electricity}_i\times\text{carbon intensity}_i$$
+
+- The **carbon intensity** of an energy source is the amount of greenhouse-gas emissions produced for each unit of electricity generated
+- Electricity generated from coal generally has a higher carbon intensity than electricity generated from wind, solar, or hydroelectric power
+- Two mining operations can consume the same amount of electricity but produce different emissions if their energy sources are different
+- Carbon intensity can also vary according to the location, time of day, season, and electricity available on the grid
+
+<div class="takeaway">Electricity consumption indicates how much energy is used; carbon intensity determines how strongly that energy use contributes to climate change.</div>
+
+## <span class="title-footprint">Miners as “energy nomads”</span>
+Mining operations require specialised hardware, electricity, cooling, and an internet connection, but they do not need to be located close to their users.
+
+- Mining facilities can move to regions where electricity is cheaper or more readily available
+- This geographical flexibility is why miners are sometimes described as **energy nomads**
+- Some facilities may use **curtailed electricity**, meaning electricity that could be generated but cannot be used or transmitted at that time
+- One example is surplus hydroelectric generation during periods of heavy rainfall
+- Some facilities use natural gas that would otherwise be burned through **gas flaring** at oil-production sites
+
+However, using surplus or flared energy does not automatically create an environmental benefit. The relevant question is what would have happened to that energy without the mining operation.
+
+<div class="takeaway">The environmental effect of mining depends on the local energy system and on the realistic alternative use of the electricity.</div>
+
+## <span class="title-footprint">The environmental footprint extends beyond carbon</span>
+An **environmental footprint** measures the different pressures that an activity places on natural resources, ecosystems, and local communities.
+
+- **Carbon footprint:** greenhouse-gas emissions associated with electricity generation, infrastructure, and supply chains
+- **Water footprint:** water used directly for cooling or indirectly by the facilities that generate electricity
+- **Land footprint:** land occupied by power-generation infrastructure, transmission networks, and mining facilities
+- **Material footprint:** raw materials and energy required to manufacture mining hardware and infrastructure
+- **Electronic waste:** mining devices that are discarded when they fail or become technically or economically obsolete
+- **Local effects:** noise, waste heat, grid congestion, and possible changes in local electricity demand and prices
+
+<div class="takeaway">A complete assessment must consider resource use, hardware, and local effects in addition to electricity consumption and greenhouse-gas emissions.</div>
+
+## <span class="title-footprint">What does Bitcoin's wider footprint mean?</span>
+A 2023 global assessment by researchers associated with the **United Nations University Institute for Water, Environment and Health (UNU-INWEH)** examined Bitcoin mining activities across **76 countries** during the **2020-2021 period**.
+
+The study estimated:
+
+>* **173.42 TWh of electricity consumption** during 2020-2021, reported by the study as greater than the electricity consumption of most individual countries
+>* **85.89 MtCO2e of greenhouse-gas emissions**, comparable to the annual emissions of approximately **190 natural-gas power plants**
+>* **1.65 km³ of water footprint**, equivalent to approximately **1.65 trillion litres** or **660,000 Olympic-sized swimming pools**
+>* more than **1,870 km² of land footprint**, approximately **1.4 times the area of Los Angeles**
+
+### Calculations behind the comparisons
+
+> **Water volume**  
+> $1\ \text{km}^3 = 10^{12}\ \text{litres}$  
+> $1.65\ \text{km}^3 = 1.65 \times 10^{12} = 1.65\ \text{trillion litres}$
+
+> **Olympic-sized swimming pools**  
+> Using a reference pool of $50\ \text{m} \times 25\ \text{m} \times 2\ \text{m}$:  
+> $50 \times 25 \times 2 = 2{,}500\ \text{m}^3$  
+> $2{,}500\ \text{m}^3 \times 1{,}000 = 2.5 \times 10^6\ \text{litres per pool}$  
+> $\dfrac{1.65 \times 10^{12}\ \text{litres}}{2.5 \times 10^6\ \text{litres per pool}} = 660{,}000\ \text{pools}$
+
+> **Natural-gas power plants**  
+> The study compares 85.89 MtCO2e with approximately 190 plants:  
+> $\dfrac{85.89\ \text{MtCO2e}}{190} \approx 0.452\ \text{MtCO2e per plant}$  
+> $190 \times 0.452 \approx 85.9\ \text{MtCO2e}$
+
+> **Land area**  
+> The study reports that 1,870 km² is approximately 1.4 times the area of Los Angeles:  
+> $\dfrac{1{,}870\ \text{km}^2}{1.4} \approx 1{,}336\ \text{km}^2$
+
+The **water footprint** includes water associated with electricity generation and cooling. The **land footprint** includes land connected to the energy sources and infrastructure supporting mining.
+
+The country-level electricity comparison is contextual information reported by the study. It is not derived from 173.42 TWh alone and requires a separate dataset of national electricity consumption.
+
+<div class="takeaway">The study shows that Bitcoin mining affects not only electricity consumption and climate, but also water and land resources.</div>
+
+<div class="source"><strong>External source:</strong> Chamanara, S., Ghaffarizadeh, S. A., Madani, K. and Dascalu, S. (2023), <em>The Environmental Footprint of Bitcoin Mining Across the Globe: Call for Urgent Action</em>, <em>Earth's Future</em>, 11(10). <a href="https://collections.unu.edu/view/UNU:9800" target="_blank">View the study</a>.</div>
+
+
+## <span class="title-footprint">Why “energy per transaction” can be misleading</span>
+A common metric divides the network’s total electricity consumption by the number of recorded transactions:
+
+$$
+\text{energy per transaction}
+=
+\frac{\text{total network electricity}}{\text{number of on-chain transactions}}
+$$
+
+However, this calculation does not measure the additional electricity required to process one more transaction.
+
+- Miners perform Proof of Work to produce blocks, whether those blocks contain few or many transactions
+- Adding one transaction to a candidate block does not cause miners to perform a proportional amount of additional hashing
+- The resulting value only distributes the network’s total electricity across the recorded transactions
+- One on-chain transaction may also represent several payments grouped together by an exchange or another service
+
+<div class="takeaway">“Energy per transaction” is an average allocation of network electricity, not the electricity directly caused by one individual transaction.</div>
+
+## <span class="title-alternatives">Ethereum before and after The Merge</span>
+Ethereum completed **The Merge** on **15 September 2022**, replacing Proof of Work with Proof of Stake.
+
+- Before The Merge, miners competed to produce blocks through repeated hash calculations
+- After The Merge, validators lock ETH as **stake**, meaning capital that can be penalised if they violate the protocol
+- Producing blocks no longer requires competitive mining
+
+```{r ethereum-merge-power, fig.width=8.5, fig.height=4}
+ethereum_power <- data.frame(
+  Consensus = c("Proof of Work", "Proof of Stake"),
+  PowerMW = c(2400, 0.90)
+)
+
+ggplot(data = ethereum_power, mapping = aes(x = Consensus, y = PowerMW, fill = Consensus)) +
+  geom_col(show.legend = FALSE) +
+  scale_y_log10(labels = label_number()) +
+  labs(title = "Estimated Ethereum power demand before and after The Merge", x = NULL, y = "Power demand (MW, logarithmic scale)") +
+  theme_minimal()
+```
+
+- Final pre-Merge demand was approximately **2.4 GW**, or **2,400 MW**
+- The updated post-Merge estimate is approximately **0.90 MW**, equivalent to **7.87 GWh/year**
+- The reduction remains greater than **99.9%**
+
+<div class="takeaway">The Merge removed competitive mining and reduced Ethereum's operational electricity demand by more than three orders of magnitude.</div>
+
+<div class="source"><strong>Data:</strong> Cambridge Centre for Alternative Finance (2026), <em>Ethereum After the Merge – A Change in Power</em>. The vertical axis uses a logarithmic scale. <a href="https://www.jbs.cam.ac.uk/faculty-research/centres/alternative-finance/publications/ethereum-after-the-merge-a-change-in-power/" target="_blank">View the report</a>.</div>
+
+## <span class="title-alternatives">How Cambridge estimates post-Merge Ethereum</span>
+Post-Merge Ethereum is evaluated using a node-based method rather than Bitcoin's mining-hardware and profitability model.
+
+```{r ethereum-node-power, fig.width=8.5, fig.height=3.8}
+node_power <- data.frame(
+  Hardware = c("Lightweight residential setup", "Network-weighted average", "Enterprise workstation"),
+  PowerW = c(18, 105, 152)
+)
+
+ggplot(data = node_power, mapping = aes(x = reorder(Hardware, PowerW), y = PowerW, fill = Hardware)) +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  labs(title = "Representative Ethereum node power demand", x = NULL, y = "Power demand (W)") +
+  theme_minimal()
+```
+
+The Cambridge analysis:
+
+>* identifies approximately **8,522 physical nodes**, which are distinct from the much larger number of economic validators
+>* tests the wall-plug power demand of **20 client combinations**
+>* scales representative hardware measurements using real-world hosting and network-composition data
+>* converts estimated node power into annualised electricity consumption
+
+<div class="takeaway">Bitcoin estimates focus on profitable mining hardware; post-Merge Ethereum estimates focus on the number, type, and power demand of network nodes.</div>
+
+<div class="source"><strong>Data:</strong> Cambridge Centre for Alternative Finance (2026), <em>Ethereum After the Merge – A Change in Power</em>. Values represent reported medians or network-weighted estimates for the hardware profiles used in the study. <a href="https://ccaf.io/cbnsi/ethereum/methodology" target="_blank">View the methodology</a>.</div>
+
+## <span class="title-alternatives">Proof of Work and Proof of Stake</span>
+### Proof of Work
+
+>* **Participants:** miners
+>* **Resource used for consensus:** computational work, specialised hardware, and electricity
+>* **Economic risk:** electricity and hardware costs are paid even when a miner does not receive the block reward
+>* **Environmental effects:** electricity consumption, greenhouse-gas emissions, cooling requirements, and electronic waste
+
+### Proof of Stake
+
+>* **Participants:** validators
+>* **Resource used for consensus:** staked cryptocurrency rather than competitive mining
+>* **Economic risk:** dishonest validators may lose part of their stake through **slashing**
+>* **Environmental effects:** electricity used by validator servers and network infrastructure, but at a much lower scale than competitive Proof-of-Work mining
+
+Proof of Stake greatly reduces operational electricity demand, but it introduces different questions concerning the concentration of stake, reliance on hosting providers, and protocol governance.
+
+<div class="takeaway">Proof of Work secures consensus through costly computation, while Proof of Stake secures consensus by placing validators' capital at risk.</div>
+
+## <span class="title-actions">Can mining support cleaner energy systems?</span>
+Mining facilities can change their electricity demand rapidly and can operate close to energy sources rather than close to blockchain users.
+
+### Possible benefits
+
+>* Mining facilities may temporarily reduce their electricity use when the grid is under stress, a practice known as **demand response**
+>* Mining may use **curtailed electricity**, meaning electricity that could be generated but cannot currently be used or transmitted
+>* Facilities may operate near remote energy sources that are not conveniently connected to other consumers
+>* Some projects use natural gas that would otherwise be burned through **gas flaring**
+
+### Important limitations
+
+>* The **counterfactual** must be considered: what would realistically happen to the energy if mining were absent?
+>* Electricity described as surplus today might be stored, transmitted, or used by another consumer in the future
+>* Burning flared gas still produces carbon dioxide, while methane leakage can add a powerful greenhouse-gas effect
+>* A renewable-electricity contract does not prove that mining caused new renewable generation to be built
+>* Noise, waste heat, water use, grid pressure, and community effects remain specific to each location
+
+<div class="takeaway">Mining can support an energy system only when the claimed benefit is demonstrated using local data and a credible alternative scenario.</div>
+
+## <span class="title-actions">A hierarchy for reducing the footprint</span>
+Environmental measures should be considered in a logical order:
+
+1. **Avoid:** use a low-energy consensus mechanism when Proof of Work is not required
+2. **Reduce:** improve hardware efficiency, cooling systems, and facility operations
+3. **Shift:** replace carbon-intensive electricity with genuinely low-carbon generation
+4. **Integrate:** provide verifiable demand response or use electricity that would otherwise be curtailed
+5. **Extend:** increase hardware lifetime through maintenance, reuse, resale, and refurbishment
+6. **Recycle:** recover useful materials from equipment that can no longer be reused
+7. **Measure and govern:** disclose energy sources, hardware, locations, emissions, uncertainty, and local environmental effects
+
+More efficient hardware reduces electricity consumption per hash, but it does not guarantee a proportional reduction in total network consumption. Lower operating costs can improve profitability and encourage additional mining activity.
+
+<div class="takeaway">Changing the consensus mechanism offers the largest possible reduction; efficiency and cleaner electricity reduce the footprint of systems that continue to use Proof of Work.</div>
+
+## <span class="title-actions">Questions to ask when evaluating an estimate</span>
+Before comparing environmental estimates, a data scientist should identify exactly what each number represents.
+
+- **Measured quantity:** is the value power demand, annualised consumption, observed consumption, emissions, or a wider environmental footprint?
+- **Method:** is the estimate based on direct measurements, an industry survey, a hardware model, or economic assumptions?
+- **Hardware assumptions:** which mining devices or validator computers are assumed to be active?
+- **System boundary:** does the estimate include only computing equipment, or also cooling, buildings, transmission losses, manufacturing, and disposal?
+- **Time and location:** which period, countries, and electricity sources are represented?
+- **Emission factors:** are emissions based on an annual average electricity mix or on the generation sources responding at a particular time?
+- **Uncertainty:** are lower and upper bounds or sensitivity analyses provided?
+- **Comparison:** do the values use equivalent periods, units, boundaries, and services?
+
+<div class="takeaway">The difficult part is not producing a number, but defining what the number includes and whether it can be compared fairly with another estimate.</div>
+
+## <span class="title-actions">Conclusions</span>
+- The environmental footprint of a blockchain depends strongly on its **consensus mechanism**
+- Proof-of-Work electricity is used mainly for the competition to produce valid blocks, not for processing each transaction individually
+- The number and efficiency of active mining machines depend partly on **expected mining profitability**
+- Bitcoin electricity consumption cannot be measured directly for the entire network and must therefore be estimated using surveys or models
+- Electricity consumption and greenhouse-gas emissions are different quantities because emissions depend on the **carbon intensity** of the energy supply
+- A complete environmental assessment may also include water, land, materials, electronic waste, and local effects
+- Ethereum demonstrates that replacing Proof of Work with Proof of Stake can reduce electricity demand by orders of magnitude
+
+> The relevant question is not simply **“Is blockchain sustainable?”**, but **“Which blockchain, secured by which consensus mechanism, powered where, measured during which period, and compared with what?”**
