@@ -1,0 +1,197 @@
+---
+title: "Stablecoins: USDC, USDT and DAI"
+author: "Riccardo Paravano"
+output:
+  prettydoc::html_pretty:
+    theme: cayman
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache = FALSE, echo = TRUE, eval = TRUE, message = FALSE, warning = FALSE, fig.align = "center")
+```
+
+## Introduction
+
+The aim of this analysis is to compare the transfer sizes and volumes of three Ethereum stablecoins: USDC, USDT and DAI.
+
+We retrieve up to 1,000 recent ERC-20 transfer events for each token and remove transfers with a value of zero.
+
+```{r load-packages}
+library(dplyr)
+library(ggplot2)
+library(httr2)
+library(knitr)
+```
+
+## Data preparation
+
+```{r api-key}
+api_key <- Sys.getenv("ETHERSCAN_API_KEY")
+```
+
+We use the Etherscan `tokentx` endpoint to retrieve the transfers of each token.
+
+```{r download-data}
+get_transfers <- function(token, contract) {
+  response <- request("https://api.etherscan.io/v2/api") |>
+    req_url_query(
+      chainid = 1,
+      module = "account",
+      action = "tokentx",
+      contractaddress = contract,
+      page = 1,
+      offset = 1000,
+      sort = "desc",
+      apikey = api_key
+    ) |>
+    req_perform() |>
+    resp_body_json(simplifyVector = TRUE)
+
+  response$result |>
+    as.data.frame() |>
+    transmute(
+      Token = token,
+      Time = as.POSIXct(as.numeric(timeStamp), origin = "1970-01-01", tz = "UTC"),
+      Hash = hash,
+      From = from,
+      To = to,
+      Amount = as.numeric(value) / 10^as.numeric(tokenDecimal)
+    )
+}
+
+usdc <- get_transfers("USDC", "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48")
+usdt <- get_transfers("USDT", "0xdac17f958d2ee523a2206206994597c13d831ec7")
+dai <- get_transfers("DAI", "0x6b175474e89094c44da98b954eedeac495271d0f")
+
+stablecoins <- bind_rows(usdc, usdt, dai) |>
+  filter(Amount > 0)
+
+glimpse(stablecoins)
+```
+
+After removing zero-value transfers, the dataset contains `r scales::comma(nrow(stablecoins))` transfers: `r paste(paste(count(stablecoins, Token)$Token, scales::comma(count(stablecoins, Token)$n)), collapse = ", ")`.
+
+# Challenge 1: How do transfer sizes differ?
+
+CHALLENGE: "How do the transfer sizes of USDC, USDT and DAI differ?"
+
+We summarize the transfer amounts of each stablecoin.
+
+```{r transfer-size-summary}
+transfer_sizes <- stablecoins |>
+  group_by(Token) |>
+  summarise(
+    Transfers = n(),
+    Minimum = min(Amount),
+    Median = median(Amount),
+    Mean = mean(Amount),
+    Maximum = max(Amount)
+  )
+
+transfer_sizes |>
+  mutate(across(Minimum:Maximum, ~ format(round(.x, 2), big.mark = ","))) |>
+  kable()
+```
+
+`r transfer_sizes$Token[which.max(transfer_sizes$Median)]` has the highest median at `r scales::comma(max(transfer_sizes$Median), accuracy = 0.01)`. `r transfer_sizes$Token[which.max(transfer_sizes$Mean)]` has the highest mean at `r scales::comma(max(transfer_sizes$Mean), accuracy = 0.01)`. The mean exceeds the median for `r sum(transfer_sizes$Mean > transfer_sizes$Median)` of the `r nrow(transfer_sizes)` tokens, showing the effect of large transfers.
+
+We compare the distributions on a logarithmic scale because the transfer amounts vary greatly.
+
+```{r transfer-size-plot}
+ggplot(data = stablecoins, mapping = aes(x = Token, y = Amount, fill = Token)) +
+  geom_boxplot(width = 0.6, outlier.alpha = 0.4, show.legend = FALSE) +
+  scale_y_log10(labels = scales::label_number(big.mark = ",")) +
+  labs(
+    title = "Stablecoin transfer sizes",
+    x = "Stablecoin",
+    y = "Transfer amount (log scale)"
+  ) +
+  theme_minimal()
+```
+
+The highest observed transfer belongs to `r transfer_sizes$Token[which.max(transfer_sizes$Maximum)]` and is worth `r scales::comma(max(transfer_sizes$Maximum), accuracy = 0.01)`. The smallest median is `r scales::comma(min(transfer_sizes$Median), accuracy = 0.01)` for `r transfer_sizes$Token[which.min(transfer_sizes$Median)]`.
+
+We can also inspect the full distribution of transfer amounts.
+
+```{r transfer-size-distribution, fig.height=8}
+ggplot(data = stablecoins, mapping = aes(x = Amount, fill = Token)) +
+  geom_histogram(bins = 20, colour = "white", show.legend = FALSE) +
+  geom_vline(
+    data = transfer_sizes,
+    mapping = aes(xintercept = Median, linetype = "Median"),
+    colour = "black"
+  ) +
+  geom_vline(
+    data = transfer_sizes,
+    mapping = aes(xintercept = Mean, linetype = "Mean"),
+    colour = "black"
+  ) +
+  scale_x_log10(
+    breaks = 10^seq(-6, 8, 2),
+    labels = scales::label_log()
+  ) +
+  scale_linetype_manual(
+    values = c("Median" = "dashed", "Mean" = "dotted"),
+    name = NULL
+  ) +
+  facet_wrap(~ Token, ncol = 1, scales = "free_y") +
+  labs(
+    title = "Distribution of stablecoin transfer sizes",
+    x = "Transfer amount (log scale)",
+    y = "Number of transfers"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "top")
+```
+
+For `r sum(transfer_sizes$Mean > transfer_sizes$Median)` of the `r nrow(transfer_sizes)` tokens, the mean is above the median. This indicates that a limited number of large transfers raise the average.
+
+# Challenge 2: How much transfer volume does each stablecoin generate?
+
+CHALLENGE: "How much transfer volume does each stablecoin generate?"
+
+We calculate the total and average volume of the positive transfers retrieved for each stablecoin.
+
+```{r transfer-volume}
+transfer_volumes <- stablecoins |>
+  group_by(Token) |>
+  summarise(
+    Transfers = n(),
+    TotalVolume = sum(Amount),
+    AverageVolume = mean(Amount)
+  ) |>
+  arrange(desc(TotalVolume))
+
+transfer_volumes |>
+  mutate(across(c(TotalVolume, AverageVolume), ~ format(round(.x, 2), big.mark = ","))) |>
+  kable()
+```
+
+`r transfer_volumes$Token[1]` has the highest total volume at `r scales::comma(transfer_volumes$TotalVolume[1], accuracy = 0.01)`, followed by `r transfer_volumes$Token[2]` at `r scales::comma(transfer_volumes$TotalVolume[2], accuracy = 0.01)` and `r transfer_volumes$Token[3]` at `r scales::comma(transfer_volumes$TotalVolume[3], accuracy = 0.01)`.
+
+```{r transfer-volume-plot}
+ggplot(
+  data = transfer_volumes,
+  mapping = aes(x = reorder(Token, TotalVolume), y = TotalVolume, fill = Token)
+) +
+  geom_col(show.legend = FALSE) +
+  geom_text(
+    mapping = aes(label = scales::comma(TotalVolume, accuracy = 1)),
+    hjust = -0.1
+  ) +
+  coord_flip() +
+  scale_y_continuous(
+    labels = scales::comma,
+    expand = expansion(mult = c(0, 0.2))
+  ) +
+  labs(
+    title = "Transfer volume by stablecoin",
+    x = "Stablecoin",
+    y = "Total volume"
+  ) +
+  theme_minimal()
+```
+
+The volume of `r transfer_volumes$Token[1]` is `r round(transfer_volumes$TotalVolume[1] / transfer_volumes$TotalVolume[2], 1)` times that of `r transfer_volumes$Token[2]`. The average transfer values range from `r scales::comma(min(transfer_volumes$AverageVolume), accuracy = 0.01)` to `r scales::comma(max(transfer_volumes$AverageVolume), accuracy = 0.01)`.
