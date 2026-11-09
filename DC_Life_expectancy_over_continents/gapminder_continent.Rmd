@@ -1,0 +1,145 @@
+---
+title: "How life expectancy changed over time for each continent"
+author: "Riccardo Paravano"
+output:
+  prettydoc::html_pretty:
+    theme: cayman
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache = FALSE, echo = TRUE, eval = TRUE, message = FALSE, warning = FALSE, fig.align = "center")
+```
+
+## Introduction
+
+The aim of this analysis is to study how life expectancy changed over time across continents and for the whole planet. Since countries have different population sizes, continental and global life expectancy must be computed as a population-weighted mean.
+
+```{r load-packages}
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(gapminder)
+library(knitr)
+```
+
+## Data preparation
+
+We use the `gapminder` dataset, which contains life expectancy, population and economic information for countries from 1952 to 2007.
+
+```{r import-data}
+data("gapminder")
+glimpse(gapminder)
+```
+
+We keep the variables needed for the analysis and remove observations with missing values.
+
+```{r clean-data}
+life_expectancy_data <- gapminder |>
+  transmute(Country = country, Continent = continent, Year = year, LifeExpectancy = lifeExp, Population = pop) |>
+  drop_na(Country, Continent, Year, LifeExpectancy, Population)
+
+life_expectancy_data |>
+  head(5) |>
+  kable(digits = 2)
+```
+
+# Challenge 1: Compute life expectancy for a continent
+
+CHALLENGE: "How can life expectancy be computed for a group of countries?"
+
+A simple mean would give the same importance to every country, independently of its population. Instead, each country's life expectancy must be weighted by its population.
+
+For a continent containing $n$ countries, let $LE_i$ be the life expectancy of country $i$ and $P_i$ its population. Continental life expectancy is:
+
+$$
+LE_{continent} =
+\frac{\sum_{i=1}^{n} P_i LE_i}
+{\sum_{i=1}^{n} P_i}
+$$
+
+The numerator is the sum of the population-weighted country values, while the denominator is the total population of the continent. In R, this can be computed with `weighted.mean()`.
+
+```{r continent-life-expectancy}
+continent_life_expectancy <- life_expectancy_data |>
+  group_by(Continent, Year) |>
+  summarise(
+    TotalPopulation = sum(Population),
+    LifeExpectancy = weighted.mean(
+      LifeExpectancy,
+      w = Population
+    ),
+    .groups = "drop"
+  )
+
+continent_life_expectancy |>
+  head(10) |>
+  kable(digits = 2)
+```
+
+# Challenge 2: How did life expectancy change for each continent?
+
+CHALLENGE: "How did population-weighted life expectancy change over time for each continent?"
+
+We plot one line for each continent. Every point represents the population-weighted life expectancy for one year.
+
+```{r continent-plot}
+ggplot(
+  data = continent_life_expectancy,
+  mapping = aes(x = Year, y = LifeExpectancy, colour = Continent)
+) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  scale_x_continuous(breaks = unique(life_expectancy_data$Year)) +
+  labs(
+    title = "Life expectancy by continent",
+    x = "Year",
+    y = "Life expectancy",
+    colour = "Continent"
+  ) +
+  theme_minimal()
+```
+
+# Challenge 3: How did life expectancy change for the whole planet?
+
+CHALLENGE: "How did population-weighted life expectancy change over time for the whole planet?"
+
+The same formula can be applied to the whole planet by grouping the countries only by year.
+
+$$
+LE_{world} = \frac{\sum_{i=1}^{n} P_i LE_i}{\sum_{i=1}^{n} P_i}
+$$
+
+```{r world-life-expectancy}
+world_life_expectancy <- life_expectancy_data |>
+  group_by(Year) |>
+  summarise(
+    TotalPopulation = sum(Population),
+    LifeExpectancy = weighted.mean(LifeExpectancy, Population),
+    .groups = "drop"
+  )
+
+world_life_expectancy |>
+  kable(digits = 2)
+```
+
+We can now plot the global population-weighted life expectancy over time.
+
+```{r world-plot}
+ggplot(
+  data = world_life_expectancy,
+  mapping = aes(x = Year, y = LifeExpectancy)
+) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  scale_x_continuous(breaks = unique(life_expectancy_data$Year)) +
+  labs(
+    title = "World life expectancy over time",
+    x = "Year",
+    y = "Life expectancy"
+  ) +
+  theme_minimal()
+```
+
+Global life expectancy increased from `r round(world_life_expectancy$LifeExpectancy[1], 2)` years in 1952 to `r round(tail(world_life_expectancy$LifeExpectancy, 1), 2)` years in 2007.

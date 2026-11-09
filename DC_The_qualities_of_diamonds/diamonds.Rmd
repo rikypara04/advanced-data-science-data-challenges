@@ -1,0 +1,214 @@
+---
+title: "Diamonds quality"
+author: "Riccardo Paravano"
+output:
+  prettydoc::html_pretty:
+    theme: cayman
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache = FALSE, echo = TRUE, eval = TRUE, message = FALSE, warning = FALSE, fig.align = "center")
+```
+
+## Introduction
+
+The aim of this analysis is to explore the qualities of diamonds and their association with price using the `ggplot2::diamonds` dataset.
+
+Recall that:
+
+- the best cut is Ideal and the worst is Fair;
+- the best color is D and the worst is J;
+- the best clarity is IF and the worst is I1.
+
+```{r load-packages}
+library(tidyverse)
+library(modelr)
+library(knitr)
+```
+
+## Data preparation
+
+We keep the variables needed for the analysis and rename them using clearer names.
+
+```{r data-preparation}
+diamonds_data <- diamonds |>
+  transmute(
+    Price = price,
+    Carat = carat,
+    Cut = cut,
+    Color = color,
+    Clarity = clarity
+  )
+
+diamonds_data |>
+  head(5) |>
+  kable(digits = 2)
+```
+
+# Challenge 1: How is diamond quality associated with price?
+
+CHALLENGE: "First of all, observe that low quality diamonds (with respect to cut, color and clarity) are more expensive."
+
+We first compute the number of diamonds and the mean price for every quality category.
+
+```{r price-by-quality}
+price_by_cut <- diamonds_data |>
+  group_by(Cut) |>
+  summarise(Diamonds = n(), MeanPrice = mean(Price), .groups = "drop")
+
+price_by_color <- diamonds_data |>
+  group_by(Color) |>
+  summarise(Diamonds = n(), MeanPrice = mean(Price), .groups = "drop")
+
+price_by_clarity <- diamonds_data |>
+  group_by(Clarity) |>
+  summarise(Diamonds = n(), MeanPrice = mean(Price), .groups = "drop")
+
+price_by_cut |> kable(digits = 2)
+price_by_color |> kable(digits = 2)
+price_by_clarity |> kable(digits = 2)
+```
+
+The tables show the apparent paradox: some lower-quality categories have a higher mean price than better-quality categories.
+
+We compare the results in a single graph, ordering every quality variable from best to worst.
+
+```{r quality-price-plot}
+quality_prices <- bind_rows(
+  price_by_cut |> transmute(Quality = as.character(Cut), MeanPrice, Variable = "Cut"),
+  price_by_color |> transmute(Quality = as.character(Color), MeanPrice, Variable = "Color"),
+  price_by_clarity |> transmute(Quality = as.character(Clarity), MeanPrice, Variable = "Clarity")
+) |>
+  mutate(
+    Variable = factor(Variable, levels = c("Cut", "Color", "Clarity")),
+    Quality = factor(Quality, levels = c(
+      "Ideal", "Premium", "Very Good", "Good", "Fair",
+      "D", "E", "F", "G", "H", "I", "J",
+      "IF", "VVS1", "VVS2", "VS1", "VS2", "SI1", "SI2", "I1"
+    ))
+  )
+
+ggplot(quality_prices, aes(Quality, MeanPrice)) +
+  geom_col() +
+  facet_wrap(~ Variable, scales = "free_x") +
+  labs(
+    title = "Mean diamond price by quality category",
+    x = "Quality category",
+    y = "Mean price (US dollars)"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+The raw averages alone do not account for differences in diamond size.
+
+# Challenge 2: How can a model explain the apparent paradox?
+
+CHALLENGE: "Using models, find an explanation and solve the apparent paradox."
+
+Carat measures diamond weight. We compute the mean carat for each quality category to determine whether the groups contain diamonds of different sizes.
+
+```{r carat-by-quality}
+carat_by_cut <- diamonds_data |>
+  group_by(Cut) |>
+  summarise(MeanCarat = mean(Carat), .groups = "drop")
+
+carat_by_color <- diamonds_data |>
+  group_by(Color) |>
+  summarise(MeanCarat = mean(Carat), .groups = "drop")
+
+carat_by_clarity <- diamonds_data |>
+  group_by(Clarity) |>
+  summarise(MeanCarat = mean(Carat), .groups = "drop")
+
+carat_by_cut |> kable(digits = 3)
+carat_by_color |> kable(digits = 3)
+carat_by_clarity |> kable(digits = 3)
+```
+
+Lower-quality categories often contain larger diamonds. Since carat is strongly associated with price, this difference can explain the misleading raw averages.
+
+```{r carat-price-plot}
+ggplot(diamonds_data, aes(log(Carat), log(Price))) +
+  geom_point(alpha = 0.08, size = 0.7) +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(
+    title = "Diamond price increases with carat",
+    x = "Log carat",
+    y = "Log price"
+  ) +
+  theme_minimal()
+```
+
+The relationship is approximately linear on logarithmic scales. We therefore model log price as a function of log carat and use the residuals to remove the effect of size.
+
+```{r carat-model}
+carat_model <- lm(log(Price) ~ log(Carat), data = diamonds_data)
+summary(carat_model)
+```
+
+```{r model-residuals}
+diamonds_model <- diamonds_data |>
+  add_residuals(carat_model, var = "PriceResidual")
+
+diamonds_model |>
+  select(Price, Carat, PriceResidual) |>
+  head(5) |>
+  kable(digits = 3)
+```
+
+A positive residual indicates a price higher than expected for the diamond's carat, while a negative residual indicates a price lower than expected.
+
+We now compute the mean residual for every quality category.
+
+```{r residuals-by-quality}
+residuals_by_cut <- diamonds_model |>
+  group_by(Cut) |>
+  summarise(MeanResidual = mean(PriceResidual), .groups = "drop")
+
+residuals_by_color <- diamonds_model |>
+  group_by(Color) |>
+  summarise(MeanResidual = mean(PriceResidual), .groups = "drop")
+
+residuals_by_clarity <- diamonds_model |>
+  group_by(Clarity) |>
+  summarise(MeanResidual = mean(PriceResidual), .groups = "drop")
+
+residuals_by_cut |> kable(digits = 3)
+residuals_by_color |> kable(digits = 3)
+residuals_by_clarity |> kable(digits = 3)
+```
+
+Finally, we display the residual results using the same quality order as before.
+
+```{r residual-quality-plot}
+residual_prices <- bind_rows(
+  residuals_by_cut |> transmute(Quality = as.character(Cut), MeanResidual, Variable = "Cut"),
+  residuals_by_color |> transmute(Quality = as.character(Color), MeanResidual, Variable = "Color"),
+  residuals_by_clarity |> transmute(Quality = as.character(Clarity), MeanResidual, Variable = "Clarity")
+) |>
+  mutate(
+    Variable = factor(Variable, levels = c("Cut", "Color", "Clarity")),
+    Quality = factor(Quality, levels = levels(quality_prices$Quality))
+  )
+
+ggplot(residual_prices, aes(Quality, MeanResidual)) +
+  geom_col() +
+  facet_wrap(~ Variable, scales = "free_x") +
+  labs(
+    title = "Mean price residual by quality category",
+    subtitle = "The effect of carat has been removed",
+    x = "Quality category",
+    y = "Mean price residual"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+After accounting for carat, better-quality diamonds generally have higher residual prices. The apparent paradox is explained by the different carat distributions: lower-quality groups often contain larger and therefore more expensive diamonds.
+
+## Conclusions
+
+The raw mean prices suggest that lower-quality diamonds are more expensive, but these comparisons include diamonds of different sizes. The model removes the strong effect of carat from log price. The residual analysis then shows that better cut, color and clarity are generally associated with higher prices when diamond size is taken into account.
