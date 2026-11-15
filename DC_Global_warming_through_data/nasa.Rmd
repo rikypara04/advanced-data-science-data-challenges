@@ -1,0 +1,148 @@
+---
+title: "The Climate Scar"
+author: "Riccardo Paravano"
+output:
+  prettydoc::html_pretty:
+    theme: cayman
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache = FALSE, echo = TRUE, message = FALSE, warning = FALSE, fig.align = "center")
+```
+
+## Creative challenge
+
+*The Climate Scar* transforms global temperature anomalies into an abstract wound crossing a white surface. The composition is generated entirely from monthly NASA GISTEMP data.
+
+```{r load-packages}
+library(tidyverse)
+```
+
+## Data preparation
+
+We import the monthly temperature anomalies and arrange them in chronological order.
+
+```{r import-data}
+url <- paste0(
+  "https://data.giss.nasa.gov/gistemp/",
+  "tabledata_v4/GLB.Ts+dSST.csv"
+)
+
+temp <- read_csv(
+  url,
+  skip = 1,
+  na = c("***", "****"),
+  show_col_types = FALSE
+) |>
+  select(Year, Jan:Dec) |>
+  pivot_longer(
+    Jan:Dec,
+    names_to = "Month",
+    values_to = "Anomaly"
+  ) |>
+  mutate(
+    Month = match(Month, month.abb),
+    Date = Year + (Month - 1) / 12
+  ) |>
+  drop_na(Anomaly) |>
+  arrange(Date)
+```
+
+## The Climate Scar
+
+Time moves from left to right, but conventional axes are removed. Each month cuts a vertical mark into the surface. The anomaly controls the direction, length, color, thickness and opacity of the mark.
+
+```{r climate-scar, fig.width=9, fig.height=9}
+scar <- temp |>
+  mutate(
+    Center = sin(Date * 0.31) * 0.20 +
+      sin(Date * 0.07) * 0.35,
+    Length = 0.20 + abs(Anomaly) * 2.8,
+    Start = Center - Length / 2,
+    End = Center + Length / 2,
+    Strength = abs(Anomaly)
+  )
+
+artwork <- ggplot(scar) +
+  geom_segment(
+    aes(
+      x = Date,
+      xend = Date,
+      y = Start,
+      yend = End,
+      colour = Anomaly,
+      linewidth = Strength,
+      alpha = Strength
+    ),
+    lineend = "round"
+  ) +
+  geom_point(
+    aes(
+      x = Date,
+      y = Center,
+      colour = Anomaly,
+      size = Strength,
+      alpha = Strength
+    )
+  ) +
+  scale_colour_gradient2(
+    low = "#2166AC",
+    mid = "#F7F7F7",
+    high = "#B2182B",
+    midpoint = 0
+  ) +
+  scale_linewidth(range = c(0.15, 4), guide = "none") +
+  scale_size(range = c(0.1, 2.5), guide = "none") +
+  scale_alpha(range = c(0.18, 0.95), guide = "none") +
+  labs(
+    title = "THE CLIMATE SCAR",
+    subtitle = "A wound drawn by monthly global temperature anomalies",
+    colour = "Anomaly (°C)",
+    caption = "NASA GISTEMP v4 | 1880–present | Baseline: 1951–1980"
+  ) +
+  theme_void() +
+  theme(
+    plot.background = element_rect(fill = "white", colour = NA),
+    panel.background = element_rect(fill = "white", colour = NA),
+    plot.title = element_text(
+      colour = "#111111",
+      size = 27,
+      face = "bold",
+      hjust = 0.5
+    ),
+    plot.subtitle = element_text(
+      colour = "grey30",
+      size = 12,
+      hjust = 0.5
+    ),
+    plot.caption = element_text(colour = "grey40", hjust = 0.5),
+    legend.position = "bottom",
+    legend.text = element_text(colour = "grey20"),
+    legend.title = element_text(colour = "grey20")
+  )
+
+artwork
+
+ggsave(
+  "the_climate_scar.png",
+  artwork,
+  width = 9,
+  height = 9,
+  dpi = 300,
+  bg = "white"
+)
+```
+
+The early part of the scar is mostly thin and blue, while the recent part becomes wider, brighter and red. This change shows that positive anomalies have become stronger and more persistent.
+
+The artwork uses five data mappings:
+
+- horizontal position represents time;
+- direction represents negative or positive anomalies;
+- length represents anomaly intensity;
+- color represents the anomaly value;
+- thickness and opacity emphasize stronger anomalies.
+
+The curved center only organizes the composition. The shape, intensity and color of every mark come from the climate data. Exact monthly values are secondary to the visible transformation of the scar through time.
